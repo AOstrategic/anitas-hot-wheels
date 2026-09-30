@@ -19,6 +19,23 @@ const getFallbackImage = (text = 'Hot Wheels') => {
   return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="%231C1C1C"/><circle cx="300" cy="200" r="140" fill="%23121212"/><text x="50%" y="46%" dominant-baseline="middle" text-anchor="middle" fill="%23FF8000" font-family="system-ui,sans-serif" font-weight="900" font-size="28" letter-spacing="2">NO PHOTO</text><text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="%23A1A1AA" font-family="system-ui,sans-serif" font-weight="600" font-size="16">${encodeURIComponent(safeText)}</text></svg>`;
 };
 
+const hasValidStudioImage = (car) => {
+  if (!car || !car.imageUrl) return false;
+  const url = car.imageUrl.trim();
+  if (!url) return false;
+  if (url.startsWith('data:image/svg+xml')) return false;
+  if (url.toLowerCase().includes('placeholder') || url.toLowerCase().includes('no-photo') || url.toLowerCase().includes('no_photo')) return false;
+  return true;
+};
+
+const getDailyDateHash = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  return y * 10000 + m * 100 + d;
+};
+
 export default function App() {
   const [collection, setCollection] = useState([]);
   const [stats, setStats] = useState({ total: 0, brands: 0, hotWheels: 0, nonHotWheels: 0 });
@@ -387,13 +404,45 @@ export default function App() {
     return matchesSearch && matchesCategory && matchesHw;
   });
 
-  // Prioritise vehicles with valid studio photos for the featured showcase
-  const spotlightCars = useMemo(() => {
-    const withImages = collection.filter((c) => Boolean(c.imageUrl && c.imageUrl.trim() !== ''));
-    return withImages.length > 0 ? withImages : collection;
+  const hasInitializedAnchor = useRef(false);
+
+  // Filter curated studio-staged vehicles (falling back gracefully to full collection if none exist yet)
+  const stagedCars = useMemo(() => {
+    return collection.filter(hasValidStudioImage);
   }, [collection]);
 
+  const spotlightCars = useMemo(() => {
+    return stagedCars.length > 0 ? stagedCars : collection;
+  }, [stagedCars, collection]);
+
+  // Deterministic daily anchor index based on current date
+  const dailyAnchorIdx = useMemo(() => {
+    if (spotlightCars.length === 0) return 0;
+    const dateHash = getDailyDateHash();
+    return Math.abs(dateHash) % spotlightCars.length;
+  }, [spotlightCars]);
+
+  const todaysPickCar = useMemo(() => {
+    if (spotlightCars.length === 0) return null;
+    return spotlightCars[dailyAnchorIdx];
+  }, [spotlightCars, dailyAnchorIdx]);
+
+  // Set initial carousel index to Today's Pick on first load without jitter on page refreshes
+  useEffect(() => {
+    if (spotlightCars.length > 0 && !hasInitializedAnchor.current) {
+      setCarouselIdx(dailyAnchorIdx);
+      hasInitializedAnchor.current = true;
+    }
+  }, [spotlightCars, dailyAnchorIdx]);
+
   const activeCar = spotlightCars.length > 0 ? spotlightCars[carouselIdx % spotlightCars.length] : null;
+
+  const isTodaysPick = Boolean(
+    todaysPickCar && activeCar && (
+      (todaysPickCar.id && activeCar.id && todaysPickCar.id === activeCar.id) ||
+      (carouselIdx % spotlightCars.length === dailyAnchorIdx)
+    )
+  );
 
   const changeSpotlightSlide = (direction) => {
     if (spotlightCars.length <= 1 || isFading) return;
@@ -496,12 +545,17 @@ export default function App() {
                 )}
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-mono font-medium text-zinc-400 bg-carbon px-2.5 py-1 rounded-lg border border-steel">
+                <span className="text-xs font-mono font-medium text-zinc-400 bg-carbon px-2.5 py-1 rounded-lg border border-steel flex items-center space-x-1">
                   <span className="text-papaya font-bold">
                     {spotlightCars.length > 0 ? (carouselIdx % spotlightCars.length) + 1 : 0}
                   </span>
-                  <span className="text-zinc-600 mx-1">/</span>
+                  <span className="text-zinc-600">/</span>
                   <span>{spotlightCars.length}</span>
+                  {stagedCars.length > 0 && (
+                    <span className="text-[10px] uppercase tracking-wider text-papaya/90 ml-1 font-sans font-bold">
+                      Staged
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={() => openEditModal(activeCar)}
@@ -542,9 +596,17 @@ export default function App() {
                 className="w-full md:w-1/2 h-52 object-contain rounded-xl bg-carbon border border-steel"
               />
               <div className="flex-1 space-y-2 text-left w-full">
-                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-papaya/20 text-papaya border border-papaya/30">
-                  {activeCar.category}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-papaya/20 text-papaya border border-papaya/30">
+                    {activeCar.category}
+                  </span>
+                  {isTodaysPick && (
+                    <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse">
+                      <Sparkles size={11} className="text-amber-400" />
+                      <span>Today's Pick</span>
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-2xl font-black text-white">{activeCar.brand} {activeCar.model}</h3>
                 <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400 pt-2 border-t border-steel">
                   <div>Colour: <span className="text-white">{activeCar.colour}</span></div>
