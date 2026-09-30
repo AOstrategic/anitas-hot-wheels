@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, Camera } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import logoImg from './assets/logo.png';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
@@ -33,8 +33,6 @@ export default function App() {
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState('');
   const [isRenderingNanoBanana, setIsRenderingNanoBanana] = useState(false);
 
   const [mainPhoto, setMainPhoto] = useState(null);
@@ -71,193 +69,6 @@ export default function App() {
     }
   };
 
-  const processWhitePaperKeying = (file) => {
-    setIsProcessingImage(true);
-    setProcessingStatus('Applying instant white-paper removal...');
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width;
-        let h = img.height;
-        const maxDim = 1200;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = w;
-        tempCanvas.height = h;
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-        tempCtx.drawImage(img, 0, 0, w, h);
-
-        const imgData = tempCtx.getImageData(0, 0, w, h);
-        const data = imgData.data;
-
-        // Target near-white paper: RGB >= 210 with low saturation
-        const isNearWhite = (r, g, b) => {
-          if (r < 210 || g < 210 || b < 210) return false;
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          return (max - min) <= 30;
-        };
-
-        const visited = new Uint8Array(w * h);
-        const queue = [];
-
-        const addSeed = (x, y) => {
-          const idx = y * w + x;
-          if (visited[idx]) return;
-          const p = idx * 4;
-          if (isNearWhite(data[p], data[p + 1], data[p + 2])) {
-            visited[idx] = 1;
-            queue.push(x, y);
-          }
-        };
-
-        // Seed flood-fill from all 4 corners and borders
-        addSeed(0, 0);
-        addSeed(w - 1, 0);
-        addSeed(0, h - 1);
-        addSeed(w - 1, h - 1);
-
-        for (let x = 0; x < w; x += 10) {
-          addSeed(x, 0);
-          addSeed(x, h - 1);
-        }
-        for (let y = 0; y < h; y += 10) {
-          addSeed(0, y);
-          addSeed(w - 1, y);
-        }
-
-        let head = 0;
-        while (head < queue.length) {
-          const cx = queue[head++];
-          const cy = queue[head++];
-          const p = (cy * w + cx) * 4;
-          data[p + 3] = 0; // Transparent
-
-          const neighbors = [
-            [cx + 1, cy],
-            [cx - 1, cy],
-            [cx, cy + 1],
-            [cx, cy - 1]
-          ];
-          for (let i = 0; i < 4; i++) {
-            const nx = neighbors[i][0];
-            const ny = neighbors[i][1];
-            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-              const nIdx = ny * w + nx;
-              if (!visited[nIdx]) {
-                visited[nIdx] = 1;
-                const np = nIdx * 4;
-                if (isNearWhite(data[np], data[np + 1], data[np + 2])) {
-                  queue.push(nx, ny);
-                }
-              }
-            }
-          }
-        }
-
-        // Find bounding box of remaining casting pixels
-        let minX = w, minY = h, maxX = 0, maxY = 0;
-        let hasCar = false;
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            if (data[(y * w + x) * 4 + 3] > 0) {
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-              hasCar = true;
-            }
-          }
-        }
-
-        tempCtx.putImageData(imgData, 0, 0);
-
-        // Composition onto 600x400 dark charcoal radial canvas
-        const canvas = canvasRef.current || document.createElement('canvas');
-        canvas.width = 600;
-        canvas.height = 400;
-        const ctx = canvas.getContext('2d');
-
-        // Studio radial gradient background
-        const grad = ctx.createRadialGradient(300, 200, 50, 300, 200, 320);
-        grad.addColorStop(0, '#262626');
-        grad.addColorStop(1, '#121212');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Soft elliptical contact shadow
-        ctx.save();
-        const shadowGrad = ctx.createRadialGradient(300, 280, 20, 300, 280, 190);
-        shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
-        shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = shadowGrad;
-        ctx.beginPath();
-        ctx.ellipse(300, 280, 190, 32, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        if (hasCar && maxX > minX && maxY > minY) {
-          const cropW = maxX - minX + 1;
-          const cropH = maxY - minY + 1;
-          const maxDrawW = 510;
-          const maxDrawH = 270;
-          const scale = Math.min(maxDrawW / cropW, maxDrawH / cropH);
-          const drawW = cropW * scale;
-          const drawH = cropH * scale;
-          const drawX = 300 - drawW / 2;
-          const drawY = 270 - drawH; // align tires with contact shadow
-
-          ctx.drawImage(tempCanvas, minX, minY, cropW, cropH, drawX, drawY, drawW, drawH);
-        } else {
-          const scale = Math.min(canvas.width / w, canvas.height / h) * 0.85;
-          const drawW = w * scale;
-          const drawH = h * scale;
-          ctx.drawImage(tempCanvas, 0, 0, w, h, (canvas.width - drawW) / 2, (canvas.height - drawH) / 2, drawW, drawH);
-        }
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-        setNormalisedPreview(dataUrl);
-        setIsProcessingImage(false);
-        setProcessingStatus('');
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleMainPhotoChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setMainPhoto(file);
-      setRemoveImage(false);
-      processWhitePaperKeying(file);
-    }
-  };
-
-  const handleStampPhotoChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setStampPhoto(file);
-    }
-  };
-
-  const handleRemovePhoto = () => {
-    setRemoveImage(true);
-    setNormalisedPreview(null);
-    setMainPhoto(null);
-    setExtractedData((prev) => (prev ? { ...prev, imageUrl: '' } : null));
-  };
-
   const toBase64 = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -266,25 +77,74 @@ export default function App() {
       reader.onerror = (error) => reject(error);
     });
 
-  const generateStudioWithNanoBanana = async () => {
-    if (!GEMINI_KEY) {
-      alert('Gemini API key is required (VITE_GEMINI_API_KEY).');
-      return;
-    }
+  const renderFallbackCroppedImage = (input) => {
+    const handleImageElement = (img) => {
+      const canvas = canvasRef.current || document.createElement('canvas');
+      canvas.width = 600;
+      canvas.height = 400;
+      const ctx = canvas.getContext('2d');
 
-    let base64Image = '';
-    if (mainPhoto) {
-      base64Image = await toBase64(mainPhoto);
-    } else if (normalisedPreview && normalisedPreview.includes('base64,')) {
-      base64Image = normalisedPreview.split('base64,')[1];
-    } else {
-      alert('Please upload a car photo first.');
+      // Studio radial gradient background
+      const grad = ctx.createRadialGradient(300, 200, 50, 300, 200, 320);
+      grad.addColorStop(0, '#262626');
+      grad.addColorStop(1, '#121212');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Contact shadow
+      ctx.save();
+      const shadowGrad = ctx.createRadialGradient(300, 280, 20, 300, 280, 190);
+      shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+      shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = shadowGrad;
+      ctx.beginPath();
+      ctx.ellipse(300, 280, 190, 32, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.85;
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      ctx.drawImage(img, (canvas.width - drawW) / 2, (canvas.height - drawH) / 2, drawW, drawH);
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      setNormalisedPreview(dataUrl);
+    };
+
+    if (input instanceof File || input instanceof Blob) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => handleImageElement(img);
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(input);
+    } else if (typeof input === 'string') {
+      const img = new Image();
+      img.onload = () => handleImageElement(img);
+      img.src = input.startsWith('data:') ? input : `data:image/jpeg;base64,${input}`;
+    }
+  };
+
+  const processAndNormaliseImage = async (input) => {
+    if (!input) return;
+
+    if (!GEMINI_KEY) {
+      alert('Gemini API key is required (VITE_GEMINI_API_KEY). Falling back to original image.');
+      renderFallbackCroppedImage(input);
       return;
     }
 
     setIsRenderingNanoBanana(true);
     try {
-      const prompt = "Professional automotive product photography of this exact die-cast car. Remove the white paper background completely. Place the car centered on a sleek dark charcoal studio pedestal with subtle Papaya Orange rim reflections, authentic tire contact shadows, and a seamless deep carbon studio background. Preserve all original casting details, tampos, paint, and wheels exactly.";
+      let base64Image = '';
+      if (input instanceof File || input instanceof Blob) {
+        base64Image = await toBase64(input);
+      } else if (typeof input === 'string') {
+        base64Image = input.includes('base64,') ? input.split('base64,')[1] : input;
+      }
+
+      const prompt = "High-end automotive catalogue product photography of this exact die-cast car. Completely remove the table, paper, and room background. Center the car on a sleek, dark charcoal turntable pedestal with subtle tyre contact shadows and soft ambient lighting against a seamless dark carbon background. Maintain all original casting details, paint finish, tampos, and wheel proportions exactly.";
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST',
@@ -323,13 +183,47 @@ export default function App() {
         setNormalisedPreview(`data:${mime};base64,${b64}`);
       } else {
         const textMsg = candidate?.content?.parts?.[0]?.text;
-        throw new Error(textMsg || 'No studio image was returned by the model.');
+        throw new Error(textMsg || 'No studio image was returned by Nano Banana 2.');
       }
     } catch (err) {
-      alert('Studio Staging with Nano Banana 2 failed: ' + err.message);
+      alert('Nano Banana 2 studio staging failed: ' + err.message + '\nFalling back to cropped original image.');
+      renderFallbackCroppedImage(input);
     } finally {
       setIsRenderingNanoBanana(false);
     }
+  };
+
+  const handleMainPhotoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setMainPhoto(file);
+      setRemoveImage(false);
+      processAndNormaliseImage(file);
+    }
+  };
+
+  const handleRegenerateStudioStaging = () => {
+    if (mainPhoto) {
+      processAndNormaliseImage(mainPhoto);
+    } else if (normalisedPreview) {
+      processAndNormaliseImage(normalisedPreview);
+    } else {
+      alert('Please select or upload a car photo first.');
+    }
+  };
+
+  const handleStampPhotoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setStampPhoto(file);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setRemoveImage(true);
+    setNormalisedPreview(null);
+    setMainPhoto(null);
+    setExtractedData((prev) => (prev ? { ...prev, imageUrl: '' } : null));
   };
 
   const scanWithGemini = async () => {
@@ -695,7 +589,7 @@ export default function App() {
                   type="file"
                   accept="image/*"
                   onChange={handleMainPhotoChange}
-                  disabled={isProcessingImage || isRenderingNanoBanana}
+                  disabled={isRenderingNanoBanana}
                   className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
                 />
               </div>
@@ -707,28 +601,21 @@ export default function App() {
                     type="file"
                     accept="image/*"
                     onChange={handleStampPhotoChange}
-                    disabled={isProcessingImage || isRenderingNanoBanana}
+                    disabled={isRenderingNanoBanana}
                     className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
                   />
                 </div>
               )}
 
-              {isProcessingImage && (
-                <div className="flex items-center space-x-2 text-xs text-papaya bg-carbon p-3 rounded-lg border border-steel">
-                  <Loader2 size={16} className="animate-spin text-papaya shrink-0" />
-                  <span>{processingStatus || 'Processing image...'}</span>
-                </div>
-              )}
-
               {isRenderingNanoBanana && (
-                <div className="flex items-center space-x-2 text-xs text-papaya bg-carbon p-3 rounded-lg border border-steel">
-                  <Loader2 size={16} className="animate-spin text-papaya shrink-0" />
-                  <span>Rendering studio shot with Nano Banana 2...</span>
+                <div className="flex items-center space-x-2.5 text-xs text-papaya bg-carbon p-3.5 rounded-xl border border-steel shadow-[0_0_15px_rgba(255,128,0,0.15)] animate-pulse">
+                  <Loader2 size={18} className="animate-spin text-papaya shrink-0" />
+                  <span className="font-semibold">Nano Banana 2 is creating studio staging...</span>
                 </div>
               )}
 
               {normalisedPreview && (
-                <div className="space-y-2 pt-1">
+                <div className="space-y-2.5 pt-1">
                   <div className="flex gap-3 items-center">
                     <img
                       src={normalisedPreview}
@@ -738,7 +625,7 @@ export default function App() {
                         e.currentTarget.onerror = null;
                         e.currentTarget.src = getFallbackImage(extractedData?.model || 'Preview');
                       }}
-                      className="w-28 h-20 object-cover rounded-lg border border-steel bg-black"
+                      className="w-28 h-20 object-cover rounded-lg border border-steel bg-black shadow-md"
                     />
                     <div className="flex flex-col text-[11px] text-zinc-400 space-y-1">
                       <span className="text-zinc-200 font-medium">Studio lighting applied</span>
@@ -757,12 +644,12 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={generateStudioWithNanoBanana}
-                    disabled={isRenderingNanoBanana || isScanning || isProcessingImage}
+                    onClick={handleRegenerateStudioStaging}
+                    disabled={isRenderingNanoBanana || isScanning}
                     className="w-full bg-asphalt hover:bg-steel border border-papaya/50 hover:border-papaya text-papaya hover:text-white font-bold py-2 px-3 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_12px_rgba(255,128,0,0.15)] disabled:opacity-50"
                   >
-                    <Camera size={15} />
-                    <span>{isRenderingNanoBanana ? 'Rendering studio shot with Nano Banana 2...' : 'Studio Staging with Nano Banana 2'}</span>
+                    <RefreshCw size={14} className={isRenderingNanoBanana ? 'animate-spin' : ''} />
+                    <span>{isRenderingNanoBanana ? 'Nano Banana 2 is creating studio staging...' : 'Regenerate Studio Staging'}</span>
                   </button>
                 </div>
               )}
@@ -802,7 +689,7 @@ export default function App() {
             {!isEditMode && !extractedData ? (
               <button
                 onClick={scanWithGemini}
-                disabled={isScanning || isProcessingImage || isRenderingNanoBanana || !mainPhoto}
+                disabled={isScanning || isRenderingNanoBanana || !mainPhoto}
                 className="w-full bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-xs flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <Sparkles size={16} />
@@ -879,7 +766,7 @@ export default function App() {
 
                 <button
                   onClick={handleSaveCar}
-                  disabled={isSaving || isProcessingImage || isRenderingNanoBanana}
+                  disabled={isSaving || isRenderingNanoBanana}
                   className="w-full bg-white hover:bg-zinc-200 disabled:opacity-50 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer"
                 >
                   <Check size={16} />
