@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Camera } from 'lucide-react';
+import { removeBackground } from '@imgly/background-removal';
+import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2 } from 'lucide-react';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -12,6 +13,11 @@ const ALLOWED_CATEGORIES = [
   'Sports Sedan', 'Roadster / Sports Car', 'Movie / TV Car',
   'Fantasy / Character Car', 'TV / Cartoon Vehicle'
 ];
+
+const getFallbackImage = (text = 'Hot Wheels') => {
+  const safeText = (text || 'Car').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 24);
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="%231C1C1C"/><circle cx="300" cy="200" r="140" fill="%23121212"/><text x="50%" y="46%" dominant-baseline="middle" text-anchor="middle" fill="%23FF8000" font-family="system-ui,sans-serif" font-weight="900" font-size="28" letter-spacing="2">NO PHOTO</text><text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="%23A1A1AA" font-family="system-ui,sans-serif" font-weight="600" font-size="16">${encodeURIComponent(safeText)}</text></svg>`;
+};
 
 export default function App() {
   const [collection, setCollection] = useState([]);
@@ -27,10 +33,13 @@ export default function App() {
 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
 
   const [mainPhoto, setMainPhoto] = useState(null);
   const [stampPhoto, setStampPhoto] = useState(null);
   const [normalisedPreview, setNormalisedPreview] = useState(null);
+  const [removeImage, setRemoveImage] = useState(false);
   const [extractedData, setExtractedData] = useState({
     brand: '',
     model: '',
@@ -61,9 +70,27 @@ export default function App() {
     }
   };
 
-  const normaliseImage = (file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
+  const processAndNormaliseImage = async (file) => {
+    setIsProcessingImage(true);
+    setProcessingStatus('Isolating vehicle (AI background removal)...');
+    try {
+      let sourceBlob;
+      try {
+        sourceBlob = await removeBackground(file, {
+          progress: (key, current, total) => {
+            if (total > 0) {
+              const pct = Math.round((current / total) * 100);
+              setProcessingStatus(`Segmenting vehicle (${pct}%)...`);
+            }
+          }
+        });
+      } catch (bgError) {
+        console.warn('AI background removal failed, falling back to direct composition:', bgError);
+        sourceBlob = file;
+      }
+
+      setProcessingStatus('Rendering studio lighting & pedestal...');
+      const imgUrl = URL.createObjectURL(sourceBlob);
       const img = new Image();
       img.onload = () => {
         const canvas = canvasRef.current || document.createElement('canvas');
@@ -71,12 +98,25 @@ export default function App() {
         canvas.height = 400;
         const ctx = canvas.getContext('2d');
 
+        // Studio radial gradient background
         const grad = ctx.createRadialGradient(300, 200, 50, 300, 200, 300);
         grad.addColorStop(0, '#262626');
         grad.addColorStop(1, '#141414');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+        // Studio pedestal shadow
+        ctx.save();
+        const shadowGrad = ctx.createRadialGradient(300, 280, 20, 300, 280, 180);
+        shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+        shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = shadowGrad;
+        ctx.beginPath();
+        ctx.ellipse(300, 280, 180, 35, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Fit & center vehicle with padding
         const hRatio = canvas.width / img.width;
         const vRatio = canvas.height / img.height;
         const ratio = Math.min(hRatio, vRatio) * 0.85;
@@ -86,17 +126,31 @@ export default function App() {
         ctx.drawImage(img, 0, 0, img.width, img.height, shiftX, shiftY, img.width * ratio, img.height * ratio);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setNormalisedPreview(dataUrl);
+        URL.revokeObjectURL(imgUrl);
+        setIsProcessingImage(false);
+        setProcessingStatus('');
       };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+
+      img.onerror = () => {
+        URL.revokeObjectURL(imgUrl);
+        setIsProcessingImage(false);
+        setProcessingStatus('');
+      };
+
+      img.src = imgUrl;
+    } catch (err) {
+      console.error('Failed to process image:', err);
+      setIsProcessingImage(false);
+      setProcessingStatus('');
+    }
   };
 
   const handleMainPhotoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       setMainPhoto(file);
-      normaliseImage(file);
+      setRemoveImage(false);
+      processAndNormaliseImage(file);
     }
   };
 
@@ -105,6 +159,13 @@ export default function App() {
     if (file) {
       setStampPhoto(file);
     }
+  };
+
+  const handleRemovePhoto = () => {
+    setRemoveImage(true);
+    setNormalisedPreview(null);
+    setMainPhoto(null);
+    setExtractedData(prev => prev ? ({ ...prev, imageUrl: '' }) : null);
   };
 
   const toBase64 = (file) =>
@@ -183,6 +244,7 @@ export default function App() {
     setEditingCarId(null);
     setMainPhoto(null);
     setStampPhoto(null);
+    setRemoveImage(false);
     setNormalisedPreview(null);
     setExtractedData(null);
     setIsModalOpen(true);
@@ -193,6 +255,7 @@ export default function App() {
     setEditingCarId(car.id);
     setMainPhoto(null);
     setStampPhoto(null);
+    setRemoveImage(false);
     setNormalisedPreview(car.imageUrl || null);
     setExtractedData({
       brand: car.brand,
@@ -237,8 +300,9 @@ export default function App() {
         country: extractedData.country,
         category: extractedData.category,
         hotWheels: extractedData.hot_wheels,
-        imageUrl: extractedData.imageUrl || '',
-        imageBase64: (normalisedPreview && normalisedPreview.startsWith('data:image')) ? normalisedPreview : ''
+        imageUrl: removeImage ? '' : (extractedData.imageUrl || ''),
+        imageBase64: (removeImage ? '' : ((normalisedPreview && normalisedPreview.startsWith('data:image')) ? normalisedPreview : '')),
+        removeImage: Boolean(removeImage)
       };
 
       await fetch(SCRIPT_URL, {
@@ -252,6 +316,7 @@ export default function App() {
       setMainPhoto(null);
       setStampPhoto(null);
       setNormalisedPreview(null);
+      setRemoveImage(false);
       fetchCollection();
     } catch (err) {
       alert('Save failed: ' + err.message);
@@ -331,20 +396,22 @@ export default function App() {
               <div className="flex space-x-2">
                 <button
                   onClick={() => openEditModal(activeCar)}
-                  className="px-3 py-1 bg-steel hover:bg-papaya hover:text-black rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors"
+                  className="px-3 py-1 bg-steel hover:bg-papaya hover:text-black rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer"
                 >
                   <Edit2 size={13} />
                   <span>Edit</span>
                 </button>
                 <button
                   onClick={() => setCarouselIdx((prev) => (prev - 1 + collection.length) % collection.length)}
-                  className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors"
+                  className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors cursor-pointer"
+                  title="Previous car"
                 >
                   <ChevronLeft size={16} />
                 </button>
                 <button
                   onClick={() => setCarouselIdx((prev) => (prev + 1) % collection.length)}
-                  className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors"
+                  className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors cursor-pointer"
+                  title="Next car"
                 >
                   <ChevronRight size={16} />
                 </button>
@@ -352,8 +419,13 @@ export default function App() {
             </div>
             <div className="flex flex-col md:flex-row items-center gap-6 w-full">
               <img
-                src={activeCar.imageUrl || `https://placehold.co/600x400/1C1C1C/FF8000?text=${encodeURIComponent(activeCar.model)}`}
+                src={activeCar.imageUrl || getFallbackImage(activeCar.model)}
                 alt={activeCar.model}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = getFallbackImage(activeCar.model);
+                }}
                 className="w-full md:w-1/2 h-52 object-contain rounded-xl bg-carbon border border-steel"
               />
               <div className="flex-1 space-y-2 text-left w-full">
@@ -408,13 +480,18 @@ export default function App() {
             <div key={car.id} className="bg-asphalt border border-steel rounded-xl p-3.5 flex flex-col justify-between hover:border-papaya/50 transition-all relative group">
               <div className="relative">
                 <img
-                  src={car.imageUrl || `https://placehold.co/400x250/1C1C1C/FF8000?text=${encodeURIComponent(car.model)}`}
+                  src={car.imageUrl || getFallbackImage(car.model)}
                   alt={car.model}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = getFallbackImage(car.model);
+                  }}
                   className="w-full h-36 object-contain rounded-lg bg-carbon mb-3"
                 />
                 <button
                   onClick={() => openEditModal(car)}
-                  className="absolute top-2 right-2 bg-carbon/90 border border-steel hover:border-papaya text-zinc-300 hover:text-papaya p-1.5 rounded-lg opacity-80 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-2 right-2 bg-carbon/90 border border-steel hover:border-papaya text-zinc-300 hover:text-papaya p-1.5 rounded-lg opacity-80 group-hover:opacity-100 transition-opacity cursor-pointer"
                   title="Edit car details or photo"
                 >
                   <Edit2 size={14} />
@@ -446,7 +523,7 @@ export default function App() {
               <h3 className="font-bold text-white uppercase tracking-wider text-sm">
                 {isEditMode ? 'Edit Vehicle Details' : 'Add New Hot Wheels'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white">
+              <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -460,7 +537,8 @@ export default function App() {
                   type="file"
                   accept="image/*"
                   onChange={handleMainPhotoChange}
-                  className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full"
+                  disabled={isProcessingImage}
+                  className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
                 />
               </div>
 
@@ -471,23 +549,83 @@ export default function App() {
                     type="file"
                     accept="image/*"
                     onChange={handleStampPhotoChange}
-                    className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full"
+                    disabled={isProcessingImage}
+                    className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
                   />
                 </div>
               )}
 
-              {normalisedPreview && (
-                <div className="flex gap-2 pt-1 items-center">
-                  <img src={normalisedPreview} alt="Studio Preview" className="w-28 h-20 object-cover rounded-lg border border-steel bg-black" />
-                  <span className="text-[11px] text-zinc-400">Studio lighting applied</span>
+              {isProcessingImage && (
+                <div className="flex items-center space-x-2 text-xs text-papaya bg-carbon p-3 rounded-lg border border-steel">
+                  <Loader2 size={16} className="animate-spin text-papaya" />
+                  <span>{processingStatus || 'Processing image with AI...'}</span>
                 </div>
+              )}
+
+              {normalisedPreview && (
+                <div className="flex gap-3 pt-1 items-center">
+                  <img
+                    src={normalisedPreview}
+                    alt="Studio Preview"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = getFallbackImage(extractedData?.model || 'Preview');
+                    }}
+                    className="w-28 h-20 object-cover rounded-lg border border-steel bg-black"
+                  />
+                  <div className="flex flex-col text-[11px] text-zinc-400 space-y-1">
+                    <span className="text-zinc-200 font-medium">Studio lighting applied</span>
+                    {isEditMode && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        className="text-xs text-red-400 hover:text-red-300 flex items-center space-x-1 cursor-pointer font-medium"
+                      >
+                        <Trash2 size={12} />
+                        <span>Remove Photo from Vehicle</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isEditMode && removeImage && (
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-red-950/40 border border-red-900/60 text-xs text-red-200">
+                  <span>Photo will be cleared from vehicle upon saving</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRemoveImage(false);
+                      const originalCar = collection.find(c => c.id === editingCarId);
+                      if (originalCar?.imageUrl) {
+                        setNormalisedPreview(originalCar.imageUrl);
+                        setExtractedData(prev => ({ ...prev, imageUrl: originalCar.imageUrl }));
+                      }
+                    }}
+                    className="underline hover:text-white cursor-pointer ml-2"
+                  >
+                    Undo
+                  </button>
+                </div>
+              )}
+
+              {isEditMode && !removeImage && !normalisedPreview && (extractedData?.imageUrl) && (
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  className="inline-flex items-center space-x-1 text-xs text-red-400 hover:text-red-300 py-1 cursor-pointer font-medium"
+                >
+                  <Trash2 size={12} />
+                  <span>Remove Photo from Vehicle</span>
+                </button>
               )}
             </div>
 
             {!isEditMode && !extractedData ? (
               <button
                 onClick={scanWithGemini}
-                disabled={isScanning || !mainPhoto}
+                disabled={isScanning || isProcessingImage || !mainPhoto}
                 className="w-full bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-xs flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <Sparkles size={16} />
@@ -564,8 +702,8 @@ export default function App() {
 
                 <button
                   onClick={handleSaveCar}
-                  disabled={isSaving}
-                  className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer"
+                  disabled={isSaving || isProcessingImage}
+                  className="w-full bg-white hover:bg-zinc-200 disabled:opacity-50 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer"
                 >
                   <Check size={16} />
                   <span>{isSaving ? 'Updating...' : (isEditMode ? 'Update Vehicle' : 'Save to Collection')}</span>
