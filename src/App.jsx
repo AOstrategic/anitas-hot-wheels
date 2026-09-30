@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, AlertCircle } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Camera } from 'lucide-react';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -20,14 +20,26 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedHw, setSelectedHw] = useState('');
   const [carouselIdx, setCarouselIdx] = useState(0);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingCarId, setEditingCarId] = useState(null);
+
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const [mainPhoto, setMainPhoto] = useState(null);
   const [stampPhoto, setStampPhoto] = useState(null);
   const [normalisedPreview, setNormalisedPreview] = useState(null);
-  const [extractedData, setExtractedData] = useState(null);
+  const [extractedData, setExtractedData] = useState({
+    brand: '',
+    model: '',
+    colour: '',
+    country: '',
+    category: 'Sports Car',
+    hot_wheels: 'Yes',
+    imageUrl: ''
+  });
 
   const canvasRef = useRef(null);
 
@@ -123,8 +135,8 @@ export default function App() {
       }
 
       const promptSystem = "You are an expert Hot Wheels and die-cast vehicle archivist. Extract details for the car database:\n" +
-        "- Brand: Vehicle manufacturer (e.g., McLaren, BMW, Porsche).\n" +
-        "- Model: Full model name (e.g., McLaren 720S, BMW 507).\n" +
+        "- Brand: Vehicle manufacturer.\n" +
+        "- Model: Full model name.\n" +
         "- Colour: Dominant body paint colour.\n" +
         "- Country: Origin country of the car brand.\n" +
         "- Category: Choose strictly one of: " + ALLOWED_CATEGORIES.join(', ') + ".\n" +
@@ -166,38 +178,73 @@ export default function App() {
     }
   };
 
+  const openAddModal = () => {
+    setIsEditMode(false);
+    setEditingCarId(null);
+    setMainPhoto(null);
+    setStampPhoto(null);
+    setNormalisedPreview(null);
+    setExtractedData(null);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (car) => {
+    setIsEditMode(true);
+    setEditingCarId(car.id);
+    setMainPhoto(null);
+    setStampPhoto(null);
+    setNormalisedPreview(car.imageUrl || null);
+    setExtractedData({
+      brand: car.brand,
+      model: car.model,
+      colour: car.colour,
+      country: car.country,
+      category: car.category,
+      hot_wheels: car.hotWheels,
+      imageUrl: car.imageUrl || ''
+    });
+    setIsModalOpen(true);
+  };
+
   const handleSaveCar = async () => {
     if (!extractedData.brand || !extractedData.model) {
       alert('Brand and Model are required.');
       return;
     }
 
-    const isDuplicate = collection.some(
-      (c) => c.brand.toLowerCase() === extractedData.brand.toLowerCase() &&
-        c.model.toLowerCase() === extractedData.model.toLowerCase()
-    );
-
-    if (isDuplicate) {
-      const confirmSave = window.confirm(
-        `This ${extractedData.brand} ${extractedData.model} is already in Anita's collection. Save duplicate casting anyway?`
+    if (!isEditMode) {
+      const isDuplicate = collection.some(
+        (c) => c.brand.toLowerCase() === extractedData.brand.toLowerCase() &&
+          c.model.toLowerCase() === extractedData.model.toLowerCase()
       );
-      if (!confirmSave) return;
+
+      if (isDuplicate) {
+        const confirmSave = window.confirm(
+          `This ${extractedData.brand} ${extractedData.model} is already in Anita's collection. Save duplicate casting anyway?`
+        );
+        if (!confirmSave) return;
+      }
     }
 
     setIsSaving(true);
     try {
+      const payload = {
+        action: isEditMode ? 'update' : 'create',
+        id: editingCarId,
+        brand: extractedData.brand,
+        model: extractedData.model,
+        colour: extractedData.colour,
+        country: extractedData.country,
+        category: extractedData.category,
+        hotWheels: extractedData.hot_wheels,
+        imageUrl: extractedData.imageUrl || '',
+        imageBase64: (normalisedPreview && normalisedPreview.startsWith('data:image')) ? normalisedPreview : ''
+      };
+
       await fetch(SCRIPT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          brand: extractedData.brand,
-          model: extractedData.model,
-          colour: extractedData.colour,
-          country: extractedData.country,
-          category: extractedData.category,
-          hotWheels: extractedData.hot_wheels,
-          imageBase64: normalisedPreview
-        })
+        body: JSON.stringify(payload)
       });
 
       setIsModalOpen(false);
@@ -244,7 +291,7 @@ export default function App() {
             </div>
           </div>
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={openAddModal}
             className="bg-papaya hover:bg-papayaDark text-black font-bold text-xs md:text-sm px-4 py-2 rounded-lg transition-all flex items-center space-x-1.5 shadow-[0_0_15px_rgba(255,128,0,0.3)] cursor-pointer"
           >
             <Plus size={16} />
@@ -282,6 +329,13 @@ export default function App() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-papaya uppercase tracking-wider">Featured Vehicle Spotlight</h2>
               <div className="flex space-x-2">
+                <button
+                  onClick={() => openEditModal(activeCar)}
+                  className="px-3 py-1 bg-steel hover:bg-papaya hover:text-black rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors"
+                >
+                  <Edit2 size={13} />
+                  <span>Edit</span>
+                </button>
                 <button
                   onClick={() => setCarouselIdx((prev) => (prev - 1 + collection.length) % collection.length)}
                   className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors"
@@ -351,12 +405,21 @@ export default function App() {
         {/* Cars Grid */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredCars.map((car) => (
-            <div key={car.id} className="bg-asphalt border border-steel rounded-xl p-3.5 flex flex-col justify-between hover:border-papaya/50 transition-all">
-              <img
-                src={car.imageUrl || `https://placehold.co/400x250/1C1C1C/FF8000?text=${encodeURIComponent(car.model)}`}
-                alt={car.model}
-                className="w-full h-36 object-contain rounded-lg bg-carbon mb-3"
-              />
+            <div key={car.id} className="bg-asphalt border border-steel rounded-xl p-3.5 flex flex-col justify-between hover:border-papaya/50 transition-all relative group">
+              <div className="relative">
+                <img
+                  src={car.imageUrl || `https://placehold.co/400x250/1C1C1C/FF8000?text=${encodeURIComponent(car.model)}`}
+                  alt={car.model}
+                  className="w-full h-36 object-contain rounded-lg bg-carbon mb-3"
+                />
+                <button
+                  onClick={() => openEditModal(car)}
+                  className="absolute top-2 right-2 bg-carbon/90 border border-steel hover:border-papaya text-zinc-300 hover:text-papaya p-1.5 rounded-lg opacity-80 group-hover:opacity-100 transition-opacity"
+                  title="Edit car details or photo"
+                >
+                  <Edit2 size={14} />
+                </button>
+              </div>
               <div>
                 <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
                   <span>{car.brand}</span>
@@ -375,12 +438,14 @@ export default function App() {
         </section>
       </main>
 
-      {/* Modal */}
+      {/* Modal (Add / Edit) */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-asphalt border border-steel rounded-2xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-steel pb-3">
-              <h3 className="font-bold text-white uppercase tracking-wider text-sm">Add New Hot Wheels</h3>
+              <h3 className="font-bold text-white uppercase tracking-wider text-sm">
+                {isEditMode ? 'Edit Vehicle Details' : 'Add New Hot Wheels'}
+              </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white">
                 <X size={18} />
               </button>
@@ -388,7 +453,9 @@ export default function App() {
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">Vehicle Photo (Required)</label>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                  {isEditMode ? 'Replace Vehicle Photo (Optional)' : 'Vehicle Photo (Required)'}
+                </label>
                 <input
                   type="file"
                   accept="image/*"
@@ -397,25 +464,27 @@ export default function App() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">Base Stamp Photo (Optional)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleStampPhotoChange}
-                  className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full"
-                />
-              </div>
+              {!isEditMode && (
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Base Stamp Photo (Optional)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleStampPhotoChange}
+                    className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full"
+                  />
+                </div>
+              )}
 
               {normalisedPreview && (
                 <div className="flex gap-2 pt-1 items-center">
                   <img src={normalisedPreview} alt="Studio Preview" className="w-28 h-20 object-cover rounded-lg border border-steel bg-black" />
-                  <span className="text-[11px] text-zinc-400">Studio background applied</span>
+                  <span className="text-[11px] text-zinc-400">Studio lighting applied</span>
                 </div>
               )}
             </div>
 
-            {!extractedData ? (
+            {!isEditMode && !extractedData ? (
               <button
                 onClick={scanWithGemini}
                 disabled={isScanning || !mainPhoto}
@@ -424,15 +493,17 @@ export default function App() {
                 <Sparkles size={16} />
                 <span>{isScanning ? 'Analysing Casting...' : 'Scan with Gemini 3.8 Flash'}</span>
               </button>
-            ) : (
+            ) : null}
+
+            {(isEditMode || extractedData) && (
               <div className="border-t border-steel pt-4 space-y-3">
-                <p className="text-xs font-bold text-zinc-400 uppercase">Review & Confirm Attributes</p>
+                <p className="text-xs font-bold text-zinc-400 uppercase">Attributes</p>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[11px] text-zinc-400">Brand</label>
                     <input
                       type="text"
-                      value={extractedData.brand}
+                      value={extractedData?.brand || ''}
                       onChange={(e) => setExtractedData({ ...extractedData, brand: e.target.value })}
                       className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                     />
@@ -441,7 +512,7 @@ export default function App() {
                     <label className="text-[11px] text-zinc-400">Model</label>
                     <input
                       type="text"
-                      value={extractedData.model}
+                      value={extractedData?.model || ''}
                       onChange={(e) => setExtractedData({ ...extractedData, model: e.target.value })}
                       className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                     />
@@ -450,7 +521,7 @@ export default function App() {
                     <label className="text-[11px] text-zinc-400">Colour</label>
                     <input
                       type="text"
-                      value={extractedData.colour}
+                      value={extractedData?.colour || ''}
                       onChange={(e) => setExtractedData({ ...extractedData, colour: e.target.value })}
                       className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                     />
@@ -459,7 +530,7 @@ export default function App() {
                     <label className="text-[11px] text-zinc-400">Country</label>
                     <input
                       type="text"
-                      value={extractedData.country}
+                      value={extractedData?.country || ''}
                       onChange={(e) => setExtractedData({ ...extractedData, country: e.target.value })}
                       className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                     />
@@ -469,7 +540,7 @@ export default function App() {
                 <div>
                   <label className="text-[11px] text-zinc-400">Category</label>
                   <select
-                    value={extractedData.category}
+                    value={extractedData?.category || 'Sports Car'}
                     onChange={(e) => setExtractedData({ ...extractedData, category: e.target.value })}
                     className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                   >
@@ -482,7 +553,7 @@ export default function App() {
                 <div>
                   <label className="text-[11px] text-zinc-400">Hot Wheels Certified?</label>
                   <select
-                    value={extractedData.hot_wheels}
+                    value={extractedData?.hot_wheels || 'Yes'}
                     onChange={(e) => setExtractedData({ ...extractedData, hot_wheels: e.target.value })}
                     className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
                   >
@@ -491,17 +562,13 @@ export default function App() {
                   </select>
                 </div>
 
-                {extractedData.confidence_notes && (
-                  <p className="text-[11px] text-zinc-500 italic">{extractedData.confidence_notes}</p>
-                )}
-
                 <button
                   onClick={handleSaveCar}
                   disabled={isSaving}
                   className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer"
                 >
                   <Check size={16} />
-                  <span>{isSaving ? 'Saving to Google Sheet...' : 'Save to Collection'}</span>
+                  <span>{isSaving ? 'Updating...' : (isEditMode ? 'Update Vehicle' : 'Save to Collection')}</span>
                 </button>
               </div>
             )}
