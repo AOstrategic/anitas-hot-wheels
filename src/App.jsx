@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import logoImg from './assets/logo.png';
 
@@ -26,6 +26,8 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedHw, setSelectedHw] = useState('');
   const [carouselIdx, setCarouselIdx] = useState(0);
+  const [isCarouselPaused, setIsCarouselPaused] = useState(false);
+  const [isFading, setIsFading] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -385,7 +387,42 @@ export default function App() {
     return matchesSearch && matchesCategory && matchesHw;
   });
 
-  const activeCar = collection[carouselIdx];
+  // Prioritise vehicles with valid studio photos for the featured showcase
+  const spotlightCars = useMemo(() => {
+    const withImages = collection.filter((c) => Boolean(c.imageUrl && c.imageUrl.trim() !== ''));
+    return withImages.length > 0 ? withImages : collection;
+  }, [collection]);
+
+  const activeCar = spotlightCars.length > 0 ? spotlightCars[carouselIdx % spotlightCars.length] : null;
+
+  const changeSpotlightSlide = (direction) => {
+    if (spotlightCars.length <= 1 || isFading) return;
+    setIsFading(true);
+    setTimeout(() => {
+      setCarouselIdx((prev) => {
+        if (direction === 'next') {
+          return (prev + 1) % spotlightCars.length;
+        } else {
+          return (prev - 1 + spotlightCars.length) % spotlightCars.length;
+        }
+      });
+      setIsFading(false);
+    }, 200);
+  };
+
+  const handleNextSpotlight = () => changeSpotlightSlide('next');
+  const handlePrevSpotlight = () => changeSpotlightSlide('prev');
+
+  // Automated rotation: advance every 7 seconds, pause on hover/touch, reset timer on manual step
+  useEffect(() => {
+    if (isCarouselPaused || spotlightCars.length <= 1) return;
+
+    const timer = setInterval(() => {
+      handleNextSpotlight();
+    }, 7000);
+
+    return () => clearInterval(timer);
+  }, [isCarouselPaused, spotlightCars.length, carouselIdx, isFading]);
 
   return (
     <div className="min-h-screen flex flex-col bg-carbon text-zinc-100">
@@ -442,10 +479,30 @@ export default function App() {
 
         {/* Carousel Showcase */}
         {collection.length > 0 && activeCar && (
-          <section className="bg-asphalt rounded-2xl border border-steel p-5 relative overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-papaya uppercase tracking-wider">Featured Vehicle Spotlight</h2>
-              <div className="flex space-x-2">
+          <section
+            onMouseEnter={() => setIsCarouselPaused(true)}
+            onMouseLeave={() => setIsCarouselPaused(false)}
+            onTouchStart={() => setIsCarouselPaused(true)}
+            onTouchEnd={() => setIsCarouselPaused(false)}
+            className="bg-asphalt rounded-2xl border border-steel p-5 relative overflow-hidden transition-colors"
+          >
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold text-papaya uppercase tracking-wider">Featured Vehicle Spotlight</h2>
+                {isCarouselPaused && (
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold border border-steel px-2 py-0.5 rounded-full bg-carbon">
+                    Paused
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono font-medium text-zinc-400 bg-carbon px-2.5 py-1 rounded-lg border border-steel">
+                  <span className="text-papaya font-bold">
+                    {spotlightCars.length > 0 ? (carouselIdx % spotlightCars.length) + 1 : 0}
+                  </span>
+                  <span className="text-zinc-600 mx-1">/</span>
+                  <span>{spotlightCars.length}</span>
+                </span>
                 <button
                   onClick={() => openEditModal(activeCar)}
                   className="px-3 py-1 bg-steel hover:bg-papaya hover:text-black rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer"
@@ -454,14 +511,14 @@ export default function App() {
                   <span>Edit</span>
                 </button>
                 <button
-                  onClick={() => setCarouselIdx((prev) => (prev - 1 + collection.length) % collection.length)}
+                  onClick={handlePrevSpotlight}
                   className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors cursor-pointer"
                   title="Previous car"
                 >
                   <ChevronLeft size={16} />
                 </button>
                 <button
-                  onClick={() => setCarouselIdx((prev) => (prev + 1) % collection.length)}
+                  onClick={handleNextSpotlight}
                   className="w-8 h-8 rounded-full bg-steel text-white hover:bg-papaya hover:text-black flex items-center justify-center transition-colors cursor-pointer"
                   title="Next car"
                 >
@@ -469,7 +526,11 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <div className="flex flex-col md:flex-row items-center gap-6 w-full">
+            <div
+              className={`flex flex-col md:flex-row items-center gap-6 w-full transition-all duration-300 ease-in-out ${
+                isFading ? 'opacity-0 scale-[0.98] translate-y-1' : 'opacity-100 scale-100 translate-y-0'
+              }`}
+            >
               <img
                 src={activeCar.imageUrl || getFallbackImage(activeCar.model)}
                 alt={activeCar.model}
