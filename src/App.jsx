@@ -14,6 +14,32 @@ const ALLOWED_CATEGORIES = [
   'Fantasy / Character Car', 'TV / Cartoon Vehicle'
 ];
 
+const ALLOWED_TYPES = [
+  'Hot Wheels',
+  'LEGO',
+  'Large Scale',
+  'Other 1:64'
+];
+
+const normalizeVehicleType = (car) => {
+  if (!car) return 'Hot Wheels';
+  if (car.type && ALLOWED_TYPES.includes(car.type)) {
+    return car.type;
+  }
+  if (car.type) {
+    const matched = ALLOWED_TYPES.find((t) => t.toLowerCase() === car.type.toLowerCase());
+    if (matched) return matched;
+  }
+  const hw = car.hotWheels || car.hot_wheels;
+  if (hw === 'Yes' || hw === true) {
+    return 'Hot Wheels';
+  }
+  if (hw === 'No' || hw === false) {
+    return 'Other 1:64';
+  }
+  return 'Hot Wheels';
+};
+
 const getFallbackImage = (text = 'Hot Wheels') => {
   const safeText = (text || 'Car').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 24);
   return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="%231C1C1C"/><circle cx="300" cy="200" r="140" fill="%23121212"/><text x="50%" y="46%" dominant-baseline="middle" text-anchor="middle" fill="%23FF8000" font-family="system-ui,sans-serif" font-weight="900" font-size="28" letter-spacing="2">NO PHOTO</text><text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="%23A1A1AA" font-family="system-ui,sans-serif" font-weight="600" font-size="16">${encodeURIComponent(safeText)}</text></svg>`;
@@ -41,7 +67,7 @@ export default function App() {
   const [stats, setStats] = useState({ total: 0, brands: 0, hotWheels: 0, nonHotWheels: 0 });
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedHw, setSelectedHw] = useState('');
+  const [selectedType, setSelectedType] = useState('');
   const [carouselIdx, setCarouselIdx] = useState(0);
   const [isCarouselPaused, setIsCarouselPaused] = useState(false);
   const [isFading, setIsFading] = useState(false);
@@ -64,7 +90,7 @@ export default function App() {
     colour: '',
     country: '',
     category: 'Sports Car',
-    hot_wheels: 'Yes',
+    type: 'Hot Wheels',
     imageUrl: ''
   });
 
@@ -80,8 +106,14 @@ export default function App() {
       const res = await fetch(SCRIPT_URL);
       const data = await res.json();
       if (data.cars) {
-        setCollection(data.cars);
-        setStats(data.stats);
+        const normalizedCars = data.cars.map((car) => ({
+          ...car,
+          type: normalizeVehicleType(car)
+        }));
+        setCollection(normalizedCars);
+        if (data.stats) {
+          setStats(data.stats);
+        }
       }
     } catch (err) {
       console.error('Failed to load collection:', err);
@@ -255,7 +287,7 @@ export default function App() {
     try {
       const mainBase64 = await toBase64(mainPhoto);
       const parts = [
-        { text: "Examine the die-cast car photo(s). Extract the technical details strictly matching the schema." },
+        { text: "Examine the die-cast or brick vehicle photo(s). Extract the technical details strictly matching the schema." },
         { inline_data: { mime_type: "image/jpeg", data: mainBase64 } }
       ];
 
@@ -264,14 +296,14 @@ export default function App() {
         parts.push({ inline_data: { mime_type: "image/jpeg", data: stampBase64 } });
       }
 
-      const promptSystem = "You are an expert Hot Wheels and die-cast vehicle archivist. Extract details for the car database:\n" +
-        "- Brand: Vehicle manufacturer.\n" +
+      const promptSystem = "You are an expert Hot Wheels, LEGO Speed Champions, and die-cast vehicle archivist. Extract details for the car database:\n" +
+        "- Brand: Vehicle manufacturer or automotive brand.\n" +
         "- Model: Full model name.\n" +
-        "- Colour: Dominant body paint colour.\n" +
+        "- Colour: Dominant body paint or brick colour.\n" +
         "- Country: Origin country of the car brand.\n" +
         "- Category: Choose strictly one of: " + ALLOWED_CATEGORIES.join(', ') + ".\n" +
-        "- Hot Wheels: 'Yes' if authentic Mattel Hot Wheels, otherwise 'No'.\n" +
-        "- Confidence: Short summary of visual clues and markings.";
+        "- Type: Choose strictly one of: 'Hot Wheels' (standard 1:64 Hot Wheels casting), 'LEGO' (Speed Champions or brick-built vehicle), 'Large Scale' (1:24, 1:18, or large pull-backs), 'Other 1:64' (Matchbox, Majorette, Tomica, etc.).\n" +
+        "- Confidence: Short summary of visual clues, scale, and markings.";
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST',
@@ -289,10 +321,10 @@ export default function App() {
                 colour: { type: "STRING" },
                 country: { type: "STRING" },
                 category: { type: "STRING", enum: ALLOWED_CATEGORIES },
-                hot_wheels: { type: "STRING", enum: ["Yes", "No"] },
+                type: { type: "STRING", enum: ALLOWED_TYPES },
                 confidence_notes: { type: "STRING" }
               },
-              required: ["brand", "model", "colour", "country", "category", "hot_wheels"]
+              required: ["brand", "model", "colour", "country", "category", "type"]
             }
           }
         })
@@ -300,7 +332,10 @@ export default function App() {
 
       const json = await res.json();
       const parsed = JSON.parse(json.candidates[0].content.parts[0].text);
-      setExtractedData(parsed);
+      setExtractedData({
+        ...parsed,
+        type: parsed.type || 'Hot Wheels'
+      });
     } catch (err) {
       alert('Scanning failed: ' + err.message);
     } finally {
@@ -315,7 +350,15 @@ export default function App() {
     setStampPhoto(null);
     setRemoveImage(false);
     setNormalisedPreview(null);
-    setExtractedData(null);
+    setExtractedData({
+      brand: '',
+      model: '',
+      colour: '',
+      country: '',
+      category: 'Sports Car',
+      type: 'Hot Wheels',
+      imageUrl: ''
+    });
     setIsModalOpen(true);
   };
 
@@ -332,7 +375,7 @@ export default function App() {
       colour: car.colour,
       country: car.country,
       category: car.category,
-      hot_wheels: car.hotWheels,
+      type: normalizeVehicleType(car),
       imageUrl: car.imageUrl || ''
     });
     setIsModalOpen(true);
@@ -360,6 +403,7 @@ export default function App() {
 
     setIsSaving(true);
     try {
+      const vehicleType = extractedData.type || 'Hot Wheels';
       const payload = {
         action: isEditMode ? 'update' : 'create',
         id: editingCarId,
@@ -368,7 +412,8 @@ export default function App() {
         colour: extractedData.colour,
         country: extractedData.country,
         category: extractedData.category,
-        hotWheels: extractedData.hot_wheels,
+        type: vehicleType,
+        hotWheels: vehicleType === 'Hot Wheels' ? 'Yes' : 'No',
         imageUrl: removeImage ? '' : (extractedData.imageUrl || ''),
         imageBase64: removeImage ? '' : ((normalisedPreview && normalisedPreview.startsWith('data:image')) ? normalisedPreview : ''),
         removeImage: Boolean(removeImage)
@@ -394,14 +439,33 @@ export default function App() {
     }
   };
 
+  const typeCounts = useMemo(() => {
+    let hw = 0;
+    let lego = 0;
+    let other = 0;
+    collection.forEach((c) => {
+      const t = normalizeVehicleType(c);
+      if (t === 'Hot Wheels') hw++;
+      else if (t === 'LEGO') lego++;
+      else other++;
+    });
+    return {
+      total: collection.length,
+      hotWheels: hw,
+      lego: lego,
+      other: other
+    };
+  }, [collection]);
+
   const filteredCars = collection.filter((c) => {
     const matchesSearch = !search ||
       c.model.toLowerCase().includes(search.toLowerCase()) ||
       c.brand.toLowerCase().includes(search.toLowerCase()) ||
       c.colour.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = !selectedCategory || c.category === selectedCategory;
-    const matchesHw = !selectedHw || c.hotWheels === selectedHw;
-    return matchesSearch && matchesCategory && matchesHw;
+    const carType = normalizeVehicleType(c);
+    const matchesType = !selectedType || carType === selectedType;
+    return matchesSearch && matchesCategory && matchesType;
   });
 
   const hasInitializedAnchor = useRef(false);
@@ -473,6 +537,44 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isCarouselPaused, spotlightCars.length, carouselIdx, isFading]);
 
+  const renderTypeBadge = (car, size = 'sm') => {
+    const type = normalizeVehicleType(car);
+    if (type === 'LEGO') {
+      return (
+        <span className={`inline-flex items-center font-black uppercase tracking-wider rounded ${
+          size === 'lg' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
+        } bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.25)]`}>
+          🧱 LEGO
+        </span>
+      );
+    }
+    if (type === 'Large Scale') {
+      return (
+        <span className={`inline-flex items-center font-bold uppercase tracking-wider rounded ${
+          size === 'lg' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
+        } bg-sky-500/20 text-sky-300 border border-sky-500/30`}>
+          Large Scale
+        </span>
+      );
+    }
+    if (type === 'Other 1:64') {
+      return (
+        <span className={`inline-flex items-center font-bold uppercase tracking-wider rounded ${
+          size === 'lg' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
+        } bg-zinc-800 text-zinc-300 border border-zinc-700`}>
+          1:64 Casting
+        </span>
+      );
+    }
+    return (
+      <span className={`inline-flex items-center font-bold uppercase tracking-wider rounded ${
+        size === 'lg' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
+      } bg-papaya/15 text-papaya border border-papaya/30`}>
+        Hot Wheels
+      </span>
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-carbon text-zinc-100">
       <canvas ref={canvasRef} className="hidden" />
@@ -490,7 +592,7 @@ export default function App() {
               <h1 className="font-extrabold tracking-wide text-white text-base md:text-lg uppercase">
                 Anita's Car Collection
               </h1>
-              <p className="text-xs text-zinc-400">Hot Wheels Garage</p>
+              <p className="text-xs text-zinc-400">Hot Wheels & Die-Cast Garage</p>
             </div>
           </div>
           <button
@@ -510,19 +612,19 @@ export default function App() {
         <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-asphalt p-4 rounded-xl border border-steel">
             <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">Total Collection</p>
-            <p className="text-3xl font-black text-papaya mt-1">{stats.total}</p>
-          </div>
-          <div className="bg-asphalt p-4 rounded-xl border border-steel">
-            <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">Unique Brands</p>
-            <p className="text-3xl font-black text-white mt-1">{stats.brands}</p>
+            <p className="text-3xl font-black text-papaya mt-1">{typeCounts.total}</p>
           </div>
           <div className="bg-asphalt p-4 rounded-xl border border-steel">
             <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">Hot Wheels</p>
-            <p className="text-3xl font-black text-white mt-1">{stats.hotWheels}</p>
+            <p className="text-3xl font-black text-white mt-1">{typeCounts.hotWheels}</p>
           </div>
           <div className="bg-asphalt p-4 rounded-xl border border-steel">
-            <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">Other Castings</p>
-            <p className="text-3xl font-black text-zinc-400 mt-1">{stats.nonHotWheels}</p>
+            <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">LEGO</p>
+            <p className="text-3xl font-black text-amber-400 mt-1">{typeCounts.lego}</p>
+          </div>
+          <div className="bg-asphalt p-4 rounded-xl border border-steel">
+            <p className="text-xs uppercase text-zinc-400 font-semibold tracking-wider">Other / Large Castings</p>
+            <p className="text-3xl font-black text-zinc-400 mt-1">{typeCounts.other}</p>
           </div>
         </section>
 
@@ -600,6 +702,7 @@ export default function App() {
                   <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-papaya/20 text-papaya border border-papaya/30">
                     {activeCar.category}
                   </span>
+                  {renderTypeBadge(activeCar, 'lg')}
                   {isTodaysPick && (
                     <span className="inline-flex items-center space-x-1 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse">
                       <Sparkles size={11} className="text-amber-400" />
@@ -611,7 +714,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400 pt-2 border-t border-steel">
                   <div>Colour: <span className="text-white">{activeCar.colour}</span></div>
                   <div>Origin: <span className="text-white">{activeCar.country}</span></div>
-                  <div>Hot Wheels: <span className="text-white">{activeCar.hotWheels}</span></div>
+                  <div>Type: <span className="text-white font-medium">{normalizeVehicleType(activeCar)}</span></div>
                   <div>Garage ID: <span className="text-white">#{activeCar.id}</span></div>
                 </div>
               </div>
@@ -639,13 +742,15 @@ export default function App() {
             ))}
           </select>
           <select
-            value={selectedHw}
-            onChange={(e) => setSelectedHw(e.target.value)}
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value)}
             className="bg-asphalt border border-steel rounded-xl px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-papaya"
           >
             <option value="">All Types</option>
-            <option value="Yes">Hot Wheels Only</option>
-            <option value="No">Other Castings</option>
+            <option value="Hot Wheels">Hot Wheels</option>
+            <option value="LEGO">LEGO</option>
+            <option value="Large Scale">Large Scale</option>
+            <option value="Other 1:64">Other 1:64</option>
           </select>
         </section>
 
@@ -674,14 +779,14 @@ export default function App() {
               </div>
               <div>
                 <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
-                  <span>{car.brand}</span>
-                  <span className="text-papaya font-semibold">{car.category}</span>
+                  <span className="font-semibold text-zinc-300 truncate max-w-[120px]">{car.brand}</span>
+                  {renderTypeBadge(car, 'sm')}
                 </div>
                 <h4 className="font-bold text-white text-sm mb-2">{car.model}</h4>
                 <div className="flex justify-between items-center text-xs text-zinc-400 pt-2 border-t border-steel/60">
                   <span>{car.colour}</span>
-                  <span className={car.hotWheels === 'Yes' ? 'text-papaya font-semibold' : 'text-zinc-500'}>
-                    {car.hotWheels === 'Yes' ? 'HW Authenticated' : 'Other Casting'}
+                  <span className="text-papaya font-semibold text-[11px]">
+                    {car.category}
                   </span>
                 </div>
               </div>
@@ -696,7 +801,7 @@ export default function App() {
           <div className="bg-asphalt border border-steel rounded-2xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-steel pb-3">
               <h3 className="font-bold text-white uppercase tracking-wider text-sm">
-                {isEditMode ? 'Edit Vehicle Details' : 'Add New Hot Wheels'}
+                {isEditMode ? 'Edit Vehicle Details' : 'Add New Vehicle'}
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white cursor-pointer">
                 <X size={18} />
@@ -876,21 +981,34 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-zinc-400">Hot Wheels Certified?</label>
-                  <select
-                    value={extractedData?.hot_wheels || 'Yes'}
-                    onChange={(e) => setExtractedData({ ...extractedData, hot_wheels: e.target.value })}
-                    className="w-full bg-carbon border border-steel rounded-lg px-2.5 py-1.5 text-xs text-white"
-                  >
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                  </select>
+                  <label className="text-[11px] text-zinc-400">Scale / Vehicle Type</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1">
+                    {ALLOWED_TYPES.map((t) => {
+                      const isSelected = (extractedData?.type || 'Hot Wheels') === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setExtractedData({ ...extractedData, type: t })}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer text-center ${
+                            isSelected
+                              ? (t === 'LEGO'
+                                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.25)]'
+                                  : 'bg-papaya/20 border-papaya text-papaya shadow-[0_0_10px_rgba(255,128,0,0.25)]')
+                              : 'bg-carbon border-steel text-zinc-400 hover:text-white hover:border-zinc-500'
+                          }`}
+                        >
+                          {t === 'LEGO' ? '🧱 LEGO' : t}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <button
                   onClick={handleSaveCar}
                   disabled={isSaving || isRenderingNanoBanana}
-                  className="w-full bg-white hover:bg-zinc-200 disabled:opacity-50 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer"
+                  className="w-full bg-white hover:bg-zinc-200 disabled:opacity-50 text-black font-bold py-2 rounded-xl transition-all text-xs uppercase flex items-center justify-center space-x-1 cursor-pointer mt-2"
                 >
                   <Check size={16} />
                   <span>{isSaving ? 'Updating...' : (isEditMode ? 'Update Vehicle' : 'Save to Collection')}</span>
