@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw, Camera, Upload } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw } from 'lucide-react';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -64,7 +64,7 @@ const getDailyDateHash = () => {
 
 export default function App() {
   const [collection, setCollection] = useState([]);
-  const [stats, setStats] = useState({ total: 0, brands: 0, hotWheels: 0, nonHotWheels: 0 });
+  const [_stats, setStats] = useState({ total: 0, brands: 0, hotWheels: 0, nonHotWheels: 0 });
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedType, setSelectedType] = useState('');
@@ -81,13 +81,11 @@ export default function App() {
   const [isRenderingNanoBanana, setIsRenderingNanoBanana] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
 
-  const cameraInputRef = useRef(null);
-  const galleryInputRef = useRef(null);
-  const stampInputRef = useRef(null);
-  const canvasRef = useRef(null);
+  const [mainPhoto, setMainPhoto] = useState(null);
   const [stampPhoto, setStampPhoto] = useState(null);
   const [normalisedPreview, setNormalisedPreview] = useState(null);
   const [removeImage, setRemoveImage] = useState(false);
+  const canvasRef = useRef(null);
   const [extractedData, setExtractedData] = useState({
     brand: '',
     model: '',
@@ -97,10 +95,6 @@ export default function App() {
     type: 'Hot Wheels',
     imageUrl: ''
   });
-
-  useEffect(() => {
-    fetchCollection();
-  }, []);
 
   const fetchCollection = async () => {
     if (!SCRIPT_URL) return;
@@ -121,6 +115,10 @@ export default function App() {
       console.error('Failed to load collection:', err);
     }
   };
+
+  useEffect(() => {
+    fetchCollection();
+  }, []);
 
   const toBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -339,16 +337,14 @@ export default function App() {
     setProcessingStatus('');
   };
 
-  const handleImageChange = (e) => {
+  const handleMainPhotoChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
       setMainPhoto(file);
       setRemoveImage(false);
       processAndNormaliseImage(file);
     }
-    e.target.value = '';
   };
-  const handleMainPhotoChange = handleImageChange;
 
 
   const handleRegenerateStudioStaging = () => {
@@ -690,10 +686,11 @@ export default function App() {
               <h1 className="font-extrabold tracking-wide text-white text-base md:text-lg uppercase">
                 Anita's Car Collection
               </h1>
-              <p className="text-xs text-zinc-400">Hot Wheels & Die-Cast Garage</p>
+              <p className="text-xs text-zinc-400">Hot Wheels Garage</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={openAddModal}
             className="bg-papaya hover:bg-papayaDark text-black font-bold text-xs md:text-sm px-4 py-2 rounded-lg transition-all flex items-center space-x-1.5 shadow-[0_0_15px_rgba(255,128,0,0.3)] cursor-pointer"
           >
@@ -868,8 +865,12 @@ export default function App() {
                   className="w-full h-36 object-contain rounded-lg bg-carbon mb-3"
                 />
                 <button
-                  onClick={() => openEditModal(car)}
-                  className="absolute top-2 right-2 bg-carbon/90 border border-steel hover:border-papaya text-zinc-300 hover:text-papaya p-1.5 rounded-lg opacity-80 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditModal(car);
+                  }}
+                  className="absolute top-2 right-2 bg-carbon/90 border border-steel hover:border-papaya text-zinc-300 hover:text-papaya p-1.5 rounded-lg opacity-90 md:opacity-80 md:group-hover:opacity-100 transition-opacity cursor-pointer z-10"
                   title="Edit car details or photo"
                 >
                   <Edit2 size={14} />
@@ -912,72 +913,25 @@ export default function App() {
                   {isEditMode ? 'Replace Vehicle Photo (Optional)' : 'Vehicle Photo (Required)'}
                 </label>
 
-                {/* Native hidden inputs */}
                 <input
-                  ref={cameraInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
-                  onChange={handleImageChange}
+                  onChange={handleMainPhotoChange}
                   disabled={isRenderingNanoBanana}
-                  className="hidden"
-                  style={{ display: 'none' }}
+                  className="w-full text-xs text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-papaya file:text-black file:font-bold hover:file:bg-papayaDark file:cursor-pointer cursor-pointer border border-steel rounded-xl bg-carbon p-1"
                 />
-                <input
-                  ref={galleryInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageChange}
-                  disabled={isRenderingNanoBanana}
-                  className="hidden"
-                  style={{ display: 'none' }}
-                />
-
-                {/* Shutter / Camera & Gallery triggers */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => cameraInputRef.current?.click()}
-                    disabled={isRenderingNanoBanana}
-                    className="bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 px-3 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_15px_rgba(255,122,0,0.3)] hover:shadow-[0_0_20px_rgba(255,122,0,0.45)]"
-                  >
-                    <Camera size={16} className="shrink-0" />
-                    <span>Take Photo</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => galleryInputRef.current?.click()}
-                    disabled={isRenderingNanoBanana}
-                    className="bg-steel hover:bg-zinc-700 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl border border-zinc-600 hover:border-zinc-500 transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer"
-                  >
-                    <Upload size={16} className="shrink-0 text-zinc-300" />
-                    <span>Upload Photo</span>
-                  </button>
-                </div>
               </div>
 
               {!isEditMode && (
                 <div>
                   <label className="block text-xs font-semibold text-zinc-300 mb-1">Base Stamp Photo (Optional)</label>
                   <input
-                    ref={stampInputRef}
                     type="file"
                     accept="image/*"
                     onChange={handleStampPhotoChange}
                     disabled={isRenderingNanoBanana}
-                    className="hidden"
-                    style={{ display: 'none' }}
+                    className="w-full text-xs text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-steel file:text-white file:font-semibold hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer border border-steel rounded-xl bg-carbon p-1"
                   />
-                  <button
-                    type="button"
-                    onClick={() => stampInputRef.current?.click()}
-                    disabled={isRenderingNanoBanana}
-                    className="w-full bg-steel hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 font-medium py-2 px-3 rounded-xl border border-zinc-600 hover:border-zinc-500 transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer"
-                  >
-                    <Upload size={14} className="shrink-0 text-zinc-400" />
-                    <span>{stampPhoto ? stampPhoto.name : 'Choose Base Stamp Photo'}</span>
-                  </button>
                 </div>
               )}
 
@@ -1060,16 +1014,17 @@ export default function App() {
               )}
             </div>
 
-            {!isEditMode && !extractedData ? (
+            {!isEditMode && (
               <button
+                type="button"
                 onClick={scanWithGemini}
                 disabled={isScanning || isRenderingNanoBanana || !mainPhoto}
-                className="w-full bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-xs flex items-center justify-center space-x-2 cursor-pointer"
+                className="w-full bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_12px_rgba(255,128,0,0.25)]"
               >
                 <Sparkles size={16} />
                 <span>{isScanning ? 'Analysing Casting...' : 'Scan with Gemini 3.8 Flash'}</span>
               </button>
-            ) : null}
+            )}
 
             {(isEditMode || extractedData) && (
               <div className="border-t border-steel pt-4 space-y-3">
