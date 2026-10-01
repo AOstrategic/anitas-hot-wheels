@@ -686,7 +686,7 @@ export default function App() {
               <h1 className="font-black tracking-wide text-white text-base md:text-lg uppercase">
                 Anita's Car Collection
               </h1>
-              <p className="text-orange-500 font-semibold tracking-wide text-xs uppercase">Hot Wheels Garage</p>
+              <p className="text-orange-400 font-medium text-xs tracking-normal mt-0.5">Hot Wheels Garage</p>
             </div>
           </div>
           <button
