@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw, Camera, Upload } from 'lucide-react';
-import logoImg from './assets/logo.png';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -681,9 +680,9 @@ export default function App() {
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <img
-              src={logoImg}
+              src="/logo-header.png"
               alt="Anita's Car Collection Logo"
-              className="w-10 h-10 md:w-11 md:h-11 rounded-xl object-cover border border-steel shadow-[0_0_12px_rgba(255,128,0,0.25)] select-none shrink-0"
+              className="w-11 h-11 object-contain drop-shadow-md select-none shrink-0"
             />
             <div>
               <h1 className="font-extrabold tracking-wide text-white text-base md:text-lg uppercase">
