@@ -82,7 +82,8 @@ export default function App() {
   const [processingStatus, setProcessingStatus] = useState('');
 
   const cameraInputRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+  const stampInputRef = useRef(null);
   const canvasRef = useRef(null);
   const [stampPhoto, setStampPhoto] = useState(null);
   const [normalisedPreview, setNormalisedPreview] = useState(null);
@@ -338,7 +339,7 @@ export default function App() {
     setProcessingStatus('');
   };
 
-  const handleMainPhotoChange = (e) => {
+  const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
       setMainPhoto(file);
@@ -347,6 +348,7 @@ export default function App() {
     }
     e.target.value = '';
   };
+  const handleMainPhotoChange = handleImageChange;
 
 
   const handleRegenerateStudioStaging = () => {
@@ -673,7 +675,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-carbon text-zinc-100">
-      <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={canvasRef} className="hidden" style={{ display: 'none' }} />
 
       {/* Header */}
       <header className="bg-asphalt border-b border-steel sticky top-0 z-30 px-4 py-3 shadow-md">
@@ -916,20 +918,22 @@ export default function App() {
                   type="file"
                   accept="image/*"
                   capture="environment"
-                  onChange={handleMainPhotoChange}
+                  onChange={handleImageChange}
                   disabled={isRenderingNanoBanana}
                   className="hidden"
+                  style={{ display: 'none' }}
                 />
                 <input
-                  ref={fileInputRef}
+                  ref={galleryInputRef}
                   type="file"
                   accept="image/*"
-                  onChange={handleMainPhotoChange}
+                  onChange={handleImageChange}
                   disabled={isRenderingNanoBanana}
                   className="hidden"
+                  style={{ display: 'none' }}
                 />
 
-                {/* Shutter / Camera & File triggers */}
+                {/* Shutter / Camera & Gallery triggers */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
@@ -943,27 +947,37 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => galleryInputRef.current?.click()}
                     disabled={isRenderingNanoBanana}
                     className="bg-steel hover:bg-zinc-700 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl border border-zinc-600 hover:border-zinc-500 transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer"
                   >
                     <Upload size={16} className="shrink-0 text-zinc-300" />
-                    <span>Choose File</span>
+                    <span>Upload Photo</span>
                   </button>
                 </div>
               </div>
-
 
               {!isEditMode && (
                 <div>
                   <label className="block text-xs font-semibold text-zinc-300 mb-1">Base Stamp Photo (Optional)</label>
                   <input
+                    ref={stampInputRef}
                     type="file"
                     accept="image/*"
                     onChange={handleStampPhotoChange}
                     disabled={isRenderingNanoBanana}
-                    className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
+                    className="hidden"
+                    style={{ display: 'none' }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => stampInputRef.current?.click()}
+                    disabled={isRenderingNanoBanana}
+                    className="w-full bg-steel hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 font-medium py-2 px-3 rounded-xl border border-zinc-600 hover:border-zinc-500 transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer"
+                  >
+                    <Upload size={14} className="shrink-0 text-zinc-400" />
+                    <span>{stampPhoto ? stampPhoto.name : 'Choose Base Stamp Photo'}</span>
+                  </button>
                 </div>
               )}
 
