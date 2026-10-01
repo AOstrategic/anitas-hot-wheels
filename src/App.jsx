@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loader2, RefreshCw, Camera, Upload } from 'lucide-react';
 import logoImg from './assets/logo.png';
 
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+const BG_REMOVE_URL = import.meta.env.VITE_BG_REMOVE_URL || '';
 
 const ALLOWED_CATEGORIES = [
   'Hypercar', 'Supercar', 'Formula 1', 'GT Race Car', 'Classic GT',
@@ -79,8 +80,11 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRenderingNanoBanana, setIsRenderingNanoBanana] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
 
-  const [mainPhoto, setMainPhoto] = useState(null);
+  const cameraInputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
   const [stampPhoto, setStampPhoto] = useState(null);
   const [normalisedPreview, setNormalisedPreview] = useState(null);
   const [removeImage, setRemoveImage] = useState(false);
@@ -93,8 +97,6 @@ export default function App() {
     type: 'Hot Wheels',
     imageUrl: ''
   });
-
-  const canvasRef = useRef(null);
 
   useEffect(() => {
     fetchCollection();
@@ -128,130 +130,225 @@ export default function App() {
       reader.onerror = (error) => reject(error);
     });
 
+  const renderShowroomTurntableCanvas = (img) => {
+    const canvas = canvasRef.current || document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+
+    // 1. Seamless deep carbon studio background
+    const bgGrad = ctx.createRadialGradient(300, 200, 50, 300, 200, 320);
+    bgGrad.addColorStop(0, '#262626');
+    bgGrad.addColorStop(1, '#121212');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Ambient floor wash: subtle radial orange glow (centre at 300, 310, inner rgba(255, 115, 0, 0.16) fading to transparent at radius 220)
+    ctx.save();
+    const floorWash = ctx.createRadialGradient(300, 310, 0, 300, 310, 220);
+    floorWash.addColorStop(0, 'rgba(255, 115, 0, 0.16)');
+    floorWash.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = floorWash;
+    ctx.beginPath();
+    ctx.arc(300, 310, 220, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Charcoal turntable disc: dark pedestal platform
+    ctx.save();
+    const turntableGrad = ctx.createRadialGradient(300, 290, 20, 300, 290, 210);
+    turntableGrad.addColorStop(0, '#242424');
+    turntableGrad.addColorStop(1, '#161616');
+    ctx.fillStyle = turntableGrad;
+    ctx.beginPath();
+    ctx.ellipse(300, 290, 210, 38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 4. Recessed LED rim light: sleek accent stroke in Papaya orange (#FF7A00) with shadowColor="#FF8C00" and shadowBlur=14
+    ctx.save();
+    ctx.strokeStyle = '#FF7A00';
+    ctx.lineWidth = 1.75;
+    ctx.shadowColor = '#FF8C00';
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.ellipse(300, 290, 210, 38, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // 5. Soft tyre contact shadow
+    ctx.save();
+    const contactShadow = ctx.createRadialGradient(300, 284, 15, 300, 284, 180);
+    contactShadow.addColorStop(0, 'rgba(0, 0, 0, 0.88)');
+    contactShadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = contactShadow;
+    ctx.beginPath();
+    ctx.ellipse(300, 284, 180, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 6. Layer isolated vehicle on top
+    const maxDrawW = 500;
+    const maxDrawH = 260;
+    const scale = Math.min(maxDrawW / img.width, maxDrawH / img.height);
+    const drawW = img.width * scale;
+    const drawH = img.height * scale;
+    const drawX = 300 - drawW / 2;
+    const drawY = 284 - drawH;
+    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
+    setNormalisedPreview(dataUrl);
+    return dataUrl;
+  };
+
   const renderFallbackCroppedImage = (input) => {
-    const handleImageElement = (img) => {
-      const canvas = canvasRef.current || document.createElement('canvas');
-      canvas.width = 600;
-      canvas.height = 400;
-      const ctx = canvas.getContext('2d');
-
-      // Studio radial gradient background
-      const grad = ctx.createRadialGradient(300, 200, 50, 300, 200, 320);
-      grad.addColorStop(0, '#262626');
-      grad.addColorStop(1, '#121212');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Contact shadow
-      ctx.save();
-      const shadowGrad = ctx.createRadialGradient(300, 280, 20, 300, 280, 190);
-      shadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
-      shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = shadowGrad;
-      ctx.beginPath();
-      ctx.ellipse(300, 280, 190, 32, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      const scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.85;
-      const drawW = img.width * scale;
-      const drawH = img.height * scale;
-      ctx.drawImage(img, (canvas.width - drawW) / 2, (canvas.height - drawH) / 2, drawW, drawH);
-
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-      setNormalisedPreview(dataUrl);
-    };
-
     if (input instanceof File || input instanceof Blob) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
-        img.onload = () => handleImageElement(img);
+        img.onload = () => renderShowroomTurntableCanvas(img);
         img.src = e.target.result;
       };
       reader.readAsDataURL(input);
     } else if (typeof input === 'string') {
       const img = new Image();
-      img.onload = () => handleImageElement(img);
+      img.onload = () => renderShowroomTurntableCanvas(img);
       img.src = input.startsWith('data:') ? input : `data:image/jpeg;base64,${input}`;
     }
+  };
+
+  const removeBackgroundWithCloudRun = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('image', file);
+
+    const cleanBase = BG_REMOVE_URL.replace(/\/+$/, '');
+    let response;
+    try {
+      response = await fetch(BG_REMOVE_URL, {
+        method: 'POST',
+        body: formData
+      });
+    } catch {
+      response = await fetch(`${cleanBase}/api/remove`, {
+        method: 'POST',
+        body: formData
+      });
+    }
+
+    if (!response.ok) {
+      throw new Error(`Cloud Run service returned HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const json = await response.json();
+      const b64 = json.image || json.data || json.image_base64 || json.result;
+      return `data:image/png;base64,${b64}`;
+    }
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
   };
 
   const processAndNormaliseImage = async (input) => {
     if (!input) return;
 
-    if (!GEMINI_KEY) {
-      alert('Gemini API key is required (VITE_GEMINI_API_KEY). Falling back to original image.');
-      renderFallbackCroppedImage(input);
-      return;
-    }
-
     setIsRenderingNanoBanana(true);
-    try {
-      let base64Image = '';
-      if (input instanceof File || input instanceof Blob) {
-        base64Image = await toBase64(input);
-      } else if (typeof input === 'string') {
-        base64Image = input.includes('base64,') ? input.split('base64,')[1] : input;
+    setProcessingStatus('Isolating vehicle & staging showroom turntable...');
+
+    // 1. Trigger Cloud Run background removal pipeline if available
+    if (BG_REMOVE_URL && (input instanceof File || input instanceof Blob)) {
+      try {
+        const isolatedUrl = await removeBackgroundWithCloudRun(input);
+        const img = new Image();
+        img.onload = () => {
+          renderShowroomTurntableCanvas(img);
+          setIsRenderingNanoBanana(false);
+          setProcessingStatus('');
+        };
+        img.onerror = () => {
+          renderFallbackCroppedImage(input);
+          setIsRenderingNanoBanana(false);
+          setProcessingStatus('');
+        };
+        img.src = isolatedUrl;
+        return;
+      } catch (cloudRunErr) {
+        console.warn('Cloud Run background removal failed, falling back to Nano Banana 2 / canvas staging:', cloudRunErr);
       }
-
-      const prompt = "High-end automotive catalogue product photography of this exact die-cast car. Completely remove the table, paper, and room background. Center the car on a sleek, dark charcoal turntable pedestal with subtle tyre contact shadows and soft ambient lighting against a seamless dark carbon background. Maintain all original casting details, paint finish, tampos, and wheel proportions exactly.";
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inline_data: {
-                    mime_type: "image/jpeg",
-                    data: base64Image
-                  }
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseModalities: ["IMAGE"]
-          }
-        })
-      });
-
-      const json = await res.json();
-      if (json.error) {
-        throw new Error(json.error.message || 'Gemini API Error');
-      }
-
-      const candidate = json.candidates?.[0];
-      const imagePart = candidate?.content?.parts?.find((p) => p.inlineData || p.inline_data);
-      if (imagePart) {
-        const dataObj = imagePart.inlineData || imagePart.inline_data;
-        const mime = dataObj.mimeType || dataObj.mime_type || 'image/png';
-        const b64 = dataObj.data;
-        setNormalisedPreview(`data:${mime};base64,${b64}`);
-      } else {
-        const textMsg = candidate?.content?.parts?.[0]?.text;
-        throw new Error(textMsg || 'No studio image was returned by Nano Banana 2.');
-      }
-    } catch (err) {
-      alert('Nano Banana 2 studio staging failed: ' + err.message + '\nFalling back to cropped original image.');
-      renderFallbackCroppedImage(input);
-    } finally {
-      setIsRenderingNanoBanana(false);
     }
+
+    // 2. Nano Banana 2 staging fallback if Gemini key is present
+    if (GEMINI_KEY) {
+      try {
+        let base64Image = '';
+        if (input instanceof File || input instanceof Blob) {
+          base64Image = await toBase64(input);
+        } else if (typeof input === 'string') {
+          base64Image = input.includes('base64,') ? input.split('base64,')[1] : input;
+        }
+
+        const prompt = "High-end automotive catalogue product photography of this exact die-cast car. Completely remove the table, paper, and room background. Center the car on a sleek, dark charcoal turntable pedestal with subtle Papaya Orange rim reflections, tyre contact shadows and soft ambient lighting against a seamless dark carbon background. Maintain all original casting details, paint finish, tampos, and wheel proportions exactly.";
+
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inline_data: {
+                      mime_type: "image/jpeg",
+                      data: base64Image
+                    }
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              responseModalities: ["IMAGE"]
+            }
+          })
+        });
+
+        const json = await res.json();
+        if (!json.error) {
+          const candidate = json.candidates?.[0];
+          const imagePart = candidate?.content?.parts?.find((p) => p.inlineData || p.inline_data);
+          if (imagePart) {
+            const dataObj = imagePart.inlineData || imagePart.inline_data;
+            const mime = dataObj.mimeType || dataObj.mime_type || 'image/png';
+            const b64 = dataObj.data;
+            setNormalisedPreview(`data:${mime};base64,${b64}`);
+            setIsRenderingNanoBanana(false);
+            setProcessingStatus('');
+            return;
+          }
+        }
+      } catch (geminiErr) {
+        console.warn('Nano Banana 2 staging failed, applying canvas showroom turntable:', geminiErr);
+      }
+    }
+
+    // 3. Fallback: render directly on illuminated showroom turntable
+    renderFallbackCroppedImage(input);
+    setIsRenderingNanoBanana(false);
+    setProcessingStatus('');
   };
 
   const handleMainPhotoChange = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (file) {
       setMainPhoto(file);
       setRemoveImage(false);
       processAndNormaliseImage(file);
     }
+    e.target.value = '';
   };
+
 
   const handleRegenerateStudioStaging = () => {
     if (mainPhoto) {
@@ -810,17 +907,53 @@ export default function App() {
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                <label className="block text-xs font-semibold text-zinc-300 mb-2">
                   {isEditMode ? 'Replace Vehicle Photo (Optional)' : 'Vehicle Photo (Required)'}
                 </label>
+
+                {/* Native hidden inputs */}
                 <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleMainPhotoChange}
+                  disabled={isRenderingNanoBanana}
+                  className="hidden"
+                />
+                <input
+                  ref={fileInputRef}
                   type="file"
                   accept="image/*"
                   onChange={handleMainPhotoChange}
                   disabled={isRenderingNanoBanana}
-                  className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-steel file:text-white hover:file:bg-papaya hover:file:text-black cursor-pointer w-full disabled:opacity-50"
+                  className="hidden"
                 />
+
+                {/* Shutter / Camera & File triggers */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={isRenderingNanoBanana}
+                    className="bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 px-3 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_15px_rgba(255,122,0,0.3)] hover:shadow-[0_0_20px_rgba(255,122,0,0.45)]"
+                  >
+                    <Camera size={16} className="shrink-0" />
+                    <span>Take Photo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRenderingNanoBanana}
+                    className="bg-steel hover:bg-zinc-700 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl border border-zinc-600 hover:border-zinc-500 transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer"
+                  >
+                    <Upload size={16} className="shrink-0 text-zinc-300" />
+                    <span>Choose File</span>
+                  </button>
+                </div>
               </div>
+
 
               {!isEditMode && (
                 <div>
@@ -838,7 +971,7 @@ export default function App() {
               {isRenderingNanoBanana && (
                 <div className="flex items-center space-x-2.5 text-xs text-papaya bg-carbon p-3.5 rounded-xl border border-steel shadow-[0_0_15px_rgba(255,128,0,0.15)] animate-pulse">
                   <Loader2 size={18} className="animate-spin text-papaya shrink-0" />
-                  <span className="font-semibold">Nano Banana 2 is creating studio staging...</span>
+                  <span className="font-semibold">{processingStatus || "Nano Banana 2 is creating studio staging..."}</span>
                 </div>
               )}
 
