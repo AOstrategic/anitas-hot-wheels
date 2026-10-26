@@ -562,6 +562,12 @@ export default function App() {
     return matchesSearch && matchesCategory && matchesType;
   });
 
+  const sortedCars = [...filteredCars].sort((a, b) => {
+    const brandDiff = (a.brand || '').localeCompare(b.brand || '', undefined, { sensitivity: 'base' });
+    if (brandDiff !== 0) return brandDiff;
+    return (a.model || a.name || '').localeCompare(b.model || b.name || '', undefined, { sensitivity: 'base' });
+  });
+
   const hasInitializedAnchor = useRef(false);
 
   // Filter curated studio-staged vehicles (falling back gracefully to full collection if none exist yet)
@@ -851,7 +857,7 @@ export default function App() {
 
         {/* Cars Grid */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCars.map((car) => (
+          {sortedCars.map((car) => (
             <div key={car.id} className="bg-asphalt border border-steel rounded-xl p-3.5 flex flex-col justify-between hover:border-papaya/50 transition-all relative group">
               <div className="relative">
                 <img
