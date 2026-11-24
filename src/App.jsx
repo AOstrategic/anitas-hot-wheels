@@ -4,6 +4,8 @@ import { Plus, ChevronLeft, ChevronRight, X, Sparkles, Check, Edit2, Trash2, Loa
 const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 const BG_REMOVE_URL = import.meta.env.VITE_BG_REMOVE_URL || '';
+const GEMINI_REASONING_MODEL = import.meta.env.VITE_GEMINI_MODEL || 'gemini-4-hydrogen';
+const GEMINI_IMAGE_MODEL = import.meta.env.VITE_GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1';
 
 const ALLOWED_CATEGORIES = [
   'Hypercar', 'Supercar', 'Formula 1', 'GT Race Car', 'Classic GT',
@@ -273,23 +275,27 @@ export default function App() {
         img.src = isolatedUrl;
         return;
       } catch (cloudRunErr) {
-        console.warn('Cloud Run background removal failed, falling back to Nano Banana 2 / canvas staging:', cloudRunErr);
+        console.warn('Cloud Run background removal failed, falling back to Nano Banana 2.1 / canvas staging:', cloudRunErr);
       }
     }
 
-    // 2. Nano Banana 2 staging fallback if Gemini key is present
+    // 2. Nano Banana 2.1 staging fallback if Gemini key is present
     if (GEMINI_KEY) {
       try {
         let base64Image = '';
+        let mimeType = 'image/jpeg';
         if (input instanceof File || input instanceof Blob) {
           base64Image = await toBase64(input);
+          mimeType = input.type || 'image/jpeg';
         } else if (typeof input === 'string') {
+          const mimeMatch = input.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+          if (mimeMatch) mimeType = mimeMatch[1];
           base64Image = input.includes('base64,') ? input.split('base64,')[1] : input;
         }
 
         const prompt = "High-end automotive catalogue product photography of this exact die-cast car. Completely remove the table, paper, and room background. Center the car on a sleek, dark charcoal turntable pedestal with subtle Papaya Orange rim reflections, tyre contact shadows and soft ambient lighting against a seamless dark carbon background. Maintain all original casting details, paint finish, tampos, and wheel proportions exactly.";
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_KEY}`, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -299,7 +305,7 @@ export default function App() {
                   { text: prompt },
                   {
                     inline_data: {
-                      mime_type: "image/jpeg",
+                      mime_type: mimeType,
                       data: base64Image
                     }
                   }
@@ -307,15 +313,21 @@ export default function App() {
               }
             ],
             generationConfig: {
-              responseModalities: ["IMAGE"]
+              responseModalities: ["IMAGE"],
+              imageConfig: {
+                aspectRatio: "3:2",
+                imageSize: "1K"
+              }
             }
           })
         });
 
         const json = await res.json();
-        if (!json.error) {
+        if (res.ok && !json.error) {
           const candidate = json.candidates?.[0];
-          const imagePart = candidate?.content?.parts?.find((p) => p.inlineData || p.inline_data);
+          const imagePart = candidate?.content?.parts?.find(
+            (p) => !p.thought && (p.inlineData || p.inline_data)
+          );
           if (imagePart) {
             const dataObj = imagePart.inlineData || imagePart.inline_data;
             const mime = dataObj.mimeType || dataObj.mime_type || 'image/png';
@@ -325,9 +337,11 @@ export default function App() {
             setProcessingStatus('');
             return;
           }
+        } else {
+          console.warn('Nano Banana 2.1 API error:', json.error || res.status);
         }
       } catch (geminiErr) {
-        console.warn('Nano Banana 2 staging failed, applying canvas showroom turntable:', geminiErr);
+        console.warn('Nano Banana 2.1 staging failed, applying canvas showroom turntable:', geminiErr);
       }
     }
 
@@ -382,12 +396,12 @@ export default function App() {
       const mainBase64 = await toBase64(mainPhoto);
       const parts = [
         { text: "Examine the die-cast or brick vehicle photo(s). Extract the technical details strictly matching the schema." },
-        { inline_data: { mime_type: "image/jpeg", data: mainBase64 } }
+        { inline_data: { mime_type: mainPhoto.type || "image/jpeg", data: mainBase64 } }
       ];
 
       if (stampPhoto) {
         const stampBase64 = await toBase64(stampPhoto);
-        parts.push({ inline_data: { mime_type: "image/jpeg", data: stampBase64 } });
+        parts.push({ inline_data: { mime_type: stampPhoto.type || "image/jpeg", data: stampBase64 } });
       }
 
       const promptSystem = "You are an expert Hot Wheels, LEGO Speed Champions, and die-cast vehicle archivist. Extract details for the car database:\n" +
@@ -399,15 +413,18 @@ export default function App() {
         "- Type: Choose strictly one of: 'Hot Wheels' (standard 1:64 Hot Wheels casting), 'LEGO' (Speed Champions or brick-built vehicle), 'Large Scale' (1:24, 1:18, or large pull-backs), 'Other 1:64' (Matchbox, Majorette, Tomica, etc.).\n" +
         "- Confidence: Short summary of visual clues, scale, and markings.";
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_KEY}`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_REASONING_MODEL}:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: promptSystem }] },
           contents: [{ parts: parts }],
           generationConfig: {
-            response_mime_type: "application/json",
-            response_schema: {
+            thinkingConfig: {
+              thinkingLevel: 'MEDIUM'
+            },
+            responseMimeType: "application/json",
+            responseSchema: {
               type: "OBJECT",
               properties: {
                 brand: { type: "STRING" },
@@ -425,11 +442,21 @@ export default function App() {
       });
 
       const json = await res.json();
-      const parsed = JSON.parse(json.candidates[0].content.parts[0].text);
-      setExtractedData({
+      if (!res.ok || json.error) {
+        throw new Error(json.error?.message || `Gemini API returned HTTP ${res.status}`);
+      }
+      const textPart = json.candidates?.[0]?.content?.parts?.find(
+        (p) => !p.thought && typeof p.text === 'string'
+      );
+      if (!textPart?.text) {
+        throw new Error('No structured response returned by Gemini 4 Hydrogen.');
+      }
+      const parsed = JSON.parse(textPart.text);
+      setExtractedData((prev) => ({
+        ...prev,
         ...parsed,
         type: parsed.type || 'Hot Wheels'
-      });
+      }));
     } catch (err) {
       alert('Scanning failed: ' + err.message);
     } finally {
@@ -944,7 +971,7 @@ export default function App() {
               {isRenderingNanoBanana && (
                 <div className="flex items-center space-x-2.5 text-xs text-papaya bg-carbon p-3.5 rounded-xl border border-steel shadow-[0_0_15px_rgba(255,128,0,0.15)] animate-pulse">
                   <Loader2 size={18} className="animate-spin text-papaya shrink-0" />
-                  <span className="font-semibold">{processingStatus || "Nano Banana 2 is creating studio staging..."}</span>
+                  <span className="font-semibold">{processingStatus || "Nano Banana 2.1 is creating studio staging..."}</span>
                 </div>
               )}
 
@@ -983,7 +1010,7 @@ export default function App() {
                     className="w-full bg-asphalt hover:bg-steel border border-papaya/50 hover:border-papaya text-papaya hover:text-white font-bold py-2 px-3 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_12px_rgba(255,128,0,0.15)] disabled:opacity-50"
                   >
                     <RefreshCw size={14} className={isRenderingNanoBanana ? 'animate-spin' : ''} />
-                    <span>{isRenderingNanoBanana ? 'Nano Banana 2 is creating studio staging...' : 'Regenerate Studio Staging'}</span>
+                    <span>{isRenderingNanoBanana ? 'Nano Banana 2.1 is creating studio staging...' : 'Regenerate Studio Staging'}</span>
                   </button>
                 </div>
               )}
@@ -1028,7 +1055,7 @@ export default function App() {
                 className="w-full bg-papaya hover:bg-papayaDark disabled:opacity-50 text-black font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-[0_0_12px_rgba(255,128,0,0.25)]"
               >
                 <Sparkles size={16} />
-                <span>{isScanning ? 'Analysing Casting...' : 'Scan with Gemini 3.8 Flash'}</span>
+                <span>{isScanning ? 'Analysing Casting...' : 'Scan with Gemini 4 Hydrogen'}</span>
               </button>
             )}
 
